@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
   hwlib_i2c_bus
-  VERSION 0.1.0
+  VERSION 0.1.1
   LANGUAGES CXX)
 
 add_library(hwlib_i2c_bus INTERFACE)
@@ -31,4 +31,9 @@ if(PROJECT_IS_TOP_LEVEL)
   add_executable(i2c-bus-test tests/i2c_bus_test.cpp)
   target_link_libraries(i2c-bus-test PRIVATE Hwlib::i2c_bus GTest::gtest_main)
   gtest_discover_tests(i2c-bus-test)
+
+  add_executable(i2c-bus-recovery-test tests/i2c_bus_recovery_test.cpp)
+  target_link_libraries(i2c-bus-recovery-test PRIVATE Hwlib::i2c_bus
+                                                      GTest::gtest_main)
+  gtest_discover_tests(i2c-bus-recovery-test)
 endif()
