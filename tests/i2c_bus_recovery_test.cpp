@@ -125,6 +125,18 @@ TEST(RecoverI2cBus, LinesLeftLowByTheAdapterAreReleasedFirst)
     ExpectFree(lines);
 }
 
+TEST(RecoverI2cBus, AStopFromTheAdaptersStateStillWaitsItsSetupTime)
+{
+    // SCL high and SDA low, just set: releasing SDA at once would be a STOP
+    // without tSU;STO.
+    FakeI2cLines lines;
+    lines.PullSdaLow();
+    lines.starts = 0U; // the test's own, not the recovery's
+    EXPECT_EQ(Recover(lines), I2cRecovery::eFree);
+    EXPECT_EQ(lines.stops, 2U); // the release, then the clock's own
+    ExpectFree(lines);
+}
+
 TEST(RecoverI2cBus, AShortedSdaIsReportedAfterNineClocks)
 {
     // a159's SwBusReset() reported success in this case.
@@ -142,7 +154,7 @@ TEST(RecoverI2cBus, AHeldSclIsReportedWithoutClocking)
     lines.sclShorted = true;
     EXPECT_EQ(Recover(lines), I2cRecovery::eSclHeld);
     EXPECT_EQ(lines.clocks, 0U);
-    EXPECT_EQ(lines.waits, 2U);
+    EXPECT_EQ(lines.waits, 3U);
     ExpectClean(lines);
 }
 

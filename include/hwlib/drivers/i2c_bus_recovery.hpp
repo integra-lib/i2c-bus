@@ -33,10 +33,12 @@ concept I2cRecoveryPins = requires(Pins& pins) {
 
 enum class I2cRecovery : std::uint8_t
 {
-    eFree,      ///< SDA was not held; one clock and a STOP were sent all the same
+    eFree,      ///< SDA was high to begin with — not a proof that no device was mid-byte; one clock
+                ///< and a STOP went out all the same
     eRecovered, ///< SDA was held low, and was let go after clocking and a STOP
     eSdaHeld,   ///< SDA stays low after nine clocks: a short, or a device that is not stuck mid-byte
-    eSclHeld,   ///< SCL stays low: nothing can be clocked
+    eSclHeld,   ///< SCL was low where it was sampled: a short, or a device stretching the clock
+                ///< longer than a half period. Retry, wait, or cycle the power: the caller's call
 };
 
 /// The I2C bus clear (UM10204, 3.1.16): a device left mid-byte by a reset of the
@@ -50,8 +52,14 @@ enum class I2cRecovery : std::uint8_t
 /// line, from a task or from a busy wait, as the caller chooses; nothing in here
 /// sleeps or counts time.
 ///
-/// Both lines are released first, and on return; after a STOP the last wait is
-/// the bus free time before the next START. Taking the pins from the I2C
+/// Every change of a line comes a half period after the one before it: tf and
+/// tHD;DAT after SCL falls, tSU;DAT before it rises, tSU;STO before a STOP, and
+/// tBUF after it, before the function returns. Both lines are released first,
+/// and on return.
+///
+/// The caller must own the bus alone while this runs: the I2C peripheral off,
+/// its interrupts and DMA quiet, no other task on the bus, and no other master —
+/// on a free bus this still sends a clock and a STOP. Taking the pins from the
 /// peripheral and handing them back is the caller's, as is what to do with
 /// eSdaHeld or eSclHeld.
 template<I2cRecoveryPins Pins, std::invocable HalfPeriod>
@@ -60,7 +68,9 @@ template<I2cRecoveryPins Pins, std::invocable HalfPeriod>
     constexpr std::uint8_t MAX_CLOCKS = 9U;
 
     // Whatever the adapter left the pins at: SDA first, so that SCL rising cannot
-    // turn it into a START.
+    // turn it into a START. The first wait holds a SCL that is already high long
+    // enough (tSU;STO) should releasing SDA make a STOP.
+    halfPeriod();
     pins.ReleaseSda();
     halfPeriod();
     pins.ReleaseScl();
@@ -78,6 +88,7 @@ template<I2cRecoveryPins Pins, std::invocable HalfPeriod>
     for (std::uint8_t clock = 0U; clock < MAX_CLOCKS; ++clock)
     {
         pins.PullSclLow();
+        halfPeriod(); // SCL well below VIL before SDA moves (UM10204 Table 11, tHD;DAT)
         pins.PullSdaLow();
         halfPeriod();
         pins.ReleaseScl();
@@ -85,7 +96,7 @@ template<I2cRecoveryPins Pins, std::invocable HalfPeriod>
         if (!pins.Scl())
         {
             pins.ReleaseSda();
-            return I2cRecovery::eSclHeld; // stretched past a half period, or shorted
+            return I2cRecovery::eSclHeld;
         }
         pins.ReleaseSda();
         halfPeriod();

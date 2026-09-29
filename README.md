@@ -79,27 +79,37 @@ struct I2cPins
     bool Sda() { return gpio_pin_get_raw(sda.port, sda.pin) == 1; }
 };
 
-// With the I2C peripheral off and the pins switched to GPIO:
+// Owning the bus alone — I2C peripheral off, its IRQ and DMA quiet, no other
+// user, no other master — with the pins switched to GPIO:
 const auto result = hwlib::drivers::RecoverI2cBus(g_pins, [] { k_busy_wait(5); });
 ```
 
 | Result | Means |
 |---|---|
-| `eFree` | SDA was not held; one clock and a STOP went out all the same |
+| `eFree` | SDA was high to begin with — not a proof that no device was mid-byte, as a 1 bit looks the same; one clock and a STOP went out all the same |
 | `eRecovered` | SDA was held and was let go |
 | `eSdaHeld` | SDA is still low after nine clocks: a short, or a device that is not merely stuck mid-byte |
-| `eSclHeld` | SCL is low, before or during the clocks: nothing can be clocked |
+| `eSclHeld` | SCL was low where it was sampled, before or during the clocks: a short, or a device stretching longer than a half period. Retry, wait or cycle the power — the caller decides |
 
 The only waiting is the callable, half a clock period between every change of a
 line — 5 µs or more for standard mode — from a busy wait or a task, as the caller
-chooses. Both lines are released first, whatever the adapter left them at, and
-on return. Handing the pins from the peripheral to GPIO and back is the
+chooses. That covers the fall of SCL before SDA moves (tf, tHD;DAT), tSU;DAT,
+tSU;STO before each STOP, and tBUF after it. Both lines are released first,
+whatever the adapter left them at, and on return; even the first release of SDA
+waits, in case SCL was already high and it makes a STOP. On a free bus the
+function still sends a clock and a STOP, so it must not run beside another
+master or a transfer. Handing the pins from the peripheral to GPIO and back is the
 adapter's; on Zephyr, `i2c_recover_bus()` does the whole job where the controller
 driver implements it.
 
 Tested against a simulated device stuck as a transmitter on every bit of a byte
 — including a 1 that makes the bus look free, and the ACK slot — as a receiver
-holding its ACK, and against shorts on either line; not yet on hardware.
+holding its ACK, and against shorts on either line, with any change on the wire
+without a wait before it counted as a fault. The lines change instantly there:
+rise and fall times, a device that stretches and then lets go, and a second
+master are for the hardware checks. Not yet run on hardware. An external review found that SDA moved right after SCL
+was pulled low, and that a first STOP from a high SCL came without its setup time;
+both now wait.
 
 ### Coming from a159
 
@@ -112,6 +122,8 @@ LATB holds 0 there, so it pulls SCL low — and read that way its closing "STOP"
 keeps SCL low while SDA is let go and pulled low again. Both lines rise only when
 TRISB is restored, in one write, so whether a STOP results is down to which pin
 settles first. Here the STOP is sent, in the very clock the device lets go.
+Its `vTaskDelay(1)` was one 1 ms tick per edge: well within every timing, and a
+thousand times slower than it needs to be.
 
 ## Testing a driver
 

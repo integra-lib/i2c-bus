@@ -14,8 +14,9 @@ namespace hwlib::drivers::testing
 /// its own ACK low as a receiver. A START or STOP resets it, as UM10204 requires.
 /// It can also be a short: SDA or SCL held low for good.
 ///
-/// Counts what the recovery must not do: a START, and a line change without the
-/// half-period wait before it — an SCL edge, or SDA moving while SCL is high.
+/// Counts what the recovery must not do: a START, and any change on the wire
+/// without a half-period wait since the change before it. Lines change at once:
+/// rise and fall times, and a second master, are left to the hardware checks.
 struct FakeI2cLines
 {
     // The device.
@@ -108,7 +109,7 @@ private:
         line              = level;
         const bool newScl = Scl();
         const bool newSda = Sda();
-        if ((scl != newScl || (scl && sda != newSda)) && !m_waited)
+        if ((scl != newScl || sda != newSda) && !m_waited)
         {
             ++violations;
         }
